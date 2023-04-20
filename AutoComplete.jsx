@@ -1,6 +1,4 @@
-import "../../styles/autoComplete.scss";
-
-import Icon, { iconTypes } from "./ui/Icon";
+import { generateId, getPropertyValue } from "../util/changeUtils";
 import { getArrowDownKey, getArrowLeftKey, getArrowRightKey, getArrowUpKey } from "../util/keyboard";
 
 import { DoIt } from "../actions/view";
@@ -10,9 +8,35 @@ import React from "react";
 import ReactDOM from "react-dom";
 import TextField from "./TextField";
 import { flowControlTask } from "../actions/flowControl";
-import { getPropertyValue } from "../util/changeUtils";
+import { isArray } from "lodash";
 import { macros } from "./ui/ShortCutKeys";
 import shortcutListener from "./ui/ShortcutListener";
+
+const AutoCompletePropTypes = PropTypes.arrayOf(PropTypes.oneOfType([
+
+    // Med denna anger du vad du vill visa för information i kolumnerna i listan med val som visas för användaren.
+    // listItemArgs={[{ property: "cusNo", title: "Kundnummer" }, { property: "name", title: "Kundnamn" }]}>
+    // I exempel ovan har vi angett en property och en titel för sagd property. Property är det som vi vill visa i listan och titel är en överskrift på kolumnen.
+    // Listan kan innehålla följande objektstrukturer:
+    // Property: Enbart Property
+    PropTypes.shape({
+        property: PropTypes.string.isRequired,
+        title: PropTypes.string.isRequired,
+
+    }),
+    // Property: Array av properties för en nästlad sökning.
+    PropTypes.shape({
+        property: PropTypes.array.isRequired,
+        title: PropTypes.string.isRequired,
+
+    }),
+    // Property: Funktion för att returnera kolumn. 
+    PropTypes.shape({
+        property: PropTypes.func.isRequired,
+        title: PropTypes.string.isRequired,
+
+    })
+]));
 
 /**
  * Standardkomponent för att rendera innehåll. Render item.text
@@ -20,35 +44,79 @@ import shortcutListener from "./ui/ShortcutListener";
 class AutoCompleteItemContent extends React.PureComponent {
     constructor(props) {
         super(props);
+
+        this.state = {
+            previousProp: "",
+            currProp: ""
+        };
+
+        this.createArray = (arr, index, item) => {
+            var prevProp = "";
+            var currProp = "";
+
+            return (<div className="auto-complete-list-item-col">
+                {arr.forEach((x, index) => {
+                    prevProp = currProp;
+                    currProp = index == 0 ? item[x] : prevProp[x];
+                })
+                }
+                {currProp}
+            </div>);
+        };
     }
 
     render() {
         const {
-            item: {
-                textCol1,
-                textCol2
-            }
+            item,
+            itemList,
+
         } = this.props;
         return (
-            <div className="auto-complete-list-item">
-                <div className="auto-complete-list-item-col">
-                    {textCol1}
-                </div>
-                {textCol2 &&
-                    <div className="auto-complete-list-item-col">
-                        {textCol2}
+            <>
+                {(itemList !== undefined && item === undefined) && (
+                    <div className="auto-complete-list-item">
+                        {itemList.map((element, index) => (
+                            <div key={index.id} className="auto-complete-list-item-col">
+                                {element["title"]}
+                            </div>
+                        ))}
                     </div>
-                }
-            </div>
+                )}
+
+                {(item !== undefined && itemList) && (
+                    <div className="auto-complete-list-item">
+                        {itemList.map((element, index) =>
+                            typeof itemList[index]["property"] === "function" ? (
+
+                                <div key={index.id} className="auto-complete-list-item-col">
+                                    {itemList[index]["property"](item)}
+                                </div>
+
+                            ) :
+                                isArray(itemList[index]["property"]) ? (
+                                    this.createArray(itemList[index]["property"], index, item)
+                                )
+                                    : (
+                                        <div key={index.id} className="auto-complete-list-item-col">
+                                            {item[itemList[index]["property"]]}
+                                        </div>
+                                    )
+                        )}
+                    </div>
+                )}
+            </>
+
         );
     }
 }
 
 AutoCompleteItemContent.propTypes = {
     item: PropTypes.shape({
-        textCol1: PropTypes.string.isRequired,
-        textCol2: PropTypes.oneOfType([PropTypes.string, PropTypes.number])
-    }).isRequired
+        property: PropTypes.string,
+        title: PropTypes.string
+    }),
+    itemList: PropTypes.array.isRequired
+
 };
 
 /**
@@ -64,16 +132,22 @@ class AutoCompleteItem extends React.PureComponent {
         const {
             id,
             item,
-            itemContentComponent,
             onSelectItem,
+            listItemArgs,
+            index
         } = this.props;
         return (
-            <li id={id} onClick={this.onClick} tabIndex={"0"}>
-                {itemContentComponent ? React.createElement(itemContentComponent, {
-                    item
-                }) : <AutoCompleteItemContent item={item} onSelectItem={onSelectItem} />
-                }
-            </li>
+            <>
+                {index === 0 && (
+                    <li id={id} tabIndex={"0"}>
+                        <AutoCompleteItemContent itemList={listItemArgs} />
+                    </li>
+                )}
+
+                <li id={id} onClick={this.onClick} tabIndex={"0"}>
+                    <AutoCompleteItemContent item={item} onSelectItem={onSelectItem} itemList={listItemArgs} onClick={this.onClick} />
+                </li>
+            </>
         );
     }
 }
@@ -83,49 +157,47 @@ AutoCompleteItem.propTypes = {
     item: PropTypes.object.isRequired,
     itemContentComponent: PropTypes.any,
     onSelectItem: PropTypes.func.isRequired,
+    listItemArgs: AutoCompletePropTypes,
+    index: PropTypes.number.isRequired
+
 };
 
 /**
  * Textfält samt lista med val som matchar inmatad text.
  */
-export default class AutoComplete extends React.PureComponent {
+export default class AutoCompleteTEST extends React.PureComponent {
     constructor(props) {
         super(props);
-
-        this.setId = index => `${this.props.uniqueId}_${index}`;
+        this.unique = generateId();
+        this.setId = index => `${this.unique}_${index}`;
         this.parseId = id => id.split("_");
 
         this.isItMounted = false;
         this.gridIgnoreKeysOnVisiblePortal = ["Enter", "Tab", ...getArrowLeftKey(), ...getArrowRightKey(), ...getArrowUpKey(), ...getArrowDownKey(), "PageDown", "PageUp"];
 
         this.state = {
+            activeOption: 0, // Vilket val som är aktiv (markerad) i dropdown-menyn
+            filteredOptions: [],  // En filtrerad lista av options baserat på vad användaren skriver
+            showPortal: false, // Om dropdown-menyn ska visas eller inte
+            userInput: "",  // Vad användaren skriver i sökfältet
             items: [],
-            search: props.initialSearch || "",
-            searchSave: undefined,
-            showPortal: false,
-            uniqueId: `autoCompleteId${props.uniqueId.toString()}`,
+            uniqueId: this.unique.toString(),
             direction: {
                 up: false,
                 down: false,
             },
         };
-
         this.scrollRef = React.createRef();
 
         this.onEdit = (source, change) => {
-            if (this.props.preview && this.props.preview.onPreviewEdit) {
-                this.props.preview.onPreviewEdit(getPropertyValue(change, "search"));
-            }
-            flowControlTask(this.props.uniqueId, () => {
+            flowControlTask(this.state.uniqueId, () => {
                 const searchValue = getPropertyValue(change, "search");
                 return this.props.onSearch(searchValue);
 
             }, payload => this.gotNewData(payload, getPropertyValue(change, "search")), DoIt.NOW);
             if (this.isItMounted) {
-                this.setState((prevState) => {
-                    if (!prevState.showPortal && this.props.callbackGridIgnoreKeys) {
-                        this.props.callbackGridIgnoreKeys(this.gridIgnoreKeysOnVisiblePortal);
-                    }
+                this.setState(() => {
+
                     return {
                         ...change,
                         showPortal: true
@@ -143,50 +215,28 @@ export default class AutoComplete extends React.PureComponent {
             }
         };
 
+        this.onDataChange = (userInput) => {
+            this.setState({
+                search: userInput || "",
+            });
+        };
+
+        //stänger listan med alternativ under/över fältet.
         this.closePortal = () => {
             if (this.isItMounted) {
                 this.setState({
                     showPortal: false
                 });
-                if (this.props.callbackGridIgnoreKeys) {
-                    this.props.callbackGridIgnoreKeys([]);
-                }
             }
         };
 
-        this.clearSearchField = () => {
-            this.setState({
-                search: "",
-                items: []
-            });
-        };
-
+        //Körs när man väljer ett val i listan av autocomplete
         this.onSelectItem = (item) => {
             this.closePortal();
-            this.clearSearchField();
+            item = this.state.items[this.getFocusedItemIndex()];
             this.props.onSelectItem(item);
         };
 
-        this.showPortalForExistingData = () => {
-            if (this.props.preview && this.state.items.length > 0 && this.state.search !== "") {
-                this.setState({
-                    showPortal: true
-                });
-                if (this.props.callbackGridIgnoreKeys) {
-                    this.props.callbackGridIgnoreKeys(this.gridIgnoreKeysOnVisiblePortal);
-                }
-            }
-        };
-        this.onDataChange = (initialSearch) => {
-            this.setState({
-                search: initialSearch || "",
-            });
-        };
-        this.getDropDownDirection = (direction) => {
-            this.setState({
-                direction,
-            });
-        };
     }
 
     componentDidMount() {
@@ -201,9 +251,6 @@ export default class AutoComplete extends React.PureComponent {
     }
 
     componentDidUpdate(prevProps, prevState) {
-        if (this.props.initialSearch !== prevProps.initialSearch && this.props.initialSearch !== this.state.search) {
-            this.onDataChange(this.props.initialSearch);
-        }
         if (this.state.direction.up && !prevState.direction.up) {
             const scrollHeight = this.scrollRef.current.scrollHeight;
             const height = this.scrollRef.current.clientHeight;
@@ -214,9 +261,6 @@ export default class AutoComplete extends React.PureComponent {
 
     componentWillUnmount() {
         this.isItMounted = false;
-        if (this.props.callbackGridIgnoreKeys) {
-            this.props.callbackGridIgnoreKeys([]);
-        }
         shortcutListener.unsubscribe(macros.moveUp, this.onKeyUp);
         shortcutListener.unsubscribe(macros.moveDown, this.onKeyDown);
         shortcutListener.unsubscribe(macros.autoComplete_Escape, this.onKeyEscape);
@@ -227,9 +271,9 @@ export default class AutoComplete extends React.PureComponent {
     }
 
     /**
-     * Går ner i listan av alternativ.
-     * @returns {void}
-     */
+      * Går ner i listan av alternativ.
+      * @returns {void}
+      */
     dirDown = () => {
         const items = this.state.items;
         if (!this.state.showPortal || items.length === 0) {
@@ -237,24 +281,18 @@ export default class AutoComplete extends React.PureComponent {
         }
         let focusedItemIndex = this.getFocusedItemIndex();
         if (focusedItemIndex <= (items.length - 1)) {
-            focusedItemIndex += 1;
+            if (focusedItemIndex == -1)
+                focusedItemIndex += 2;
+            else
+                focusedItemIndex += 1;
             const domNode = ReactDOM.findDOMNode(this.refs[this.setId(focusedItemIndex)]);
             if (domNode) {
                 domNode.focus();
-                if (this.props.preview) {
-                    const item = items[focusedItemIndex];
-                    const str = this.props.preview.formatPreviewStr(item);
-                    this.setState({
-                        search: str,
-                        searchSave: this.state.searchSave === undefined ? this.state.search : this.state.searchSave,
-                        showPortal: true
-                    });
-                    this.props.preview.onPreviewItem(item);
-                }
+                this.handlePreview(items[focusedItemIndex]);
             }
             return true;
         }
-
+        return false; // Returnera false här när du når slutet av listan.
     };
 
     /**
@@ -268,21 +306,14 @@ export default class AutoComplete extends React.PureComponent {
         }
 
         let focusedItemIndex = this.getFocusedItemIndex();
+        if (focusedItemIndex === 0)
+            focusedItemIndex = 1;
         if (focusedItemIndex > 0) {
             focusedItemIndex -= 1;
             const domNode = ReactDOM.findDOMNode(this.refs[this.setId(focusedItemIndex)]);
             if (domNode) {
                 domNode.focus();
-                if (this.props.preview) {
-                    const item = items[focusedItemIndex];
-                    const str = this.props.preview.formatPreviewStr(item);
-                    this.setState({
-                        search: str,
-                        searchSave: this.state.searchSave === undefined ? this.state.search : this.state.searchSave,
-                        showPortal: true
-                    });
-                    this.props.preview.onPreviewItem(item);
-                }
+                this.handlePreview(items[focusedItemIndex]);
             }
             return true;
         } else {
@@ -293,6 +324,40 @@ export default class AutoComplete extends React.PureComponent {
             }
         }
     };
+
+
+
+    /**
+     * formatPreview, onPreview och handlePreview sköter visning av propertyn i textfältet medans användaren rör sig upp och ner i listan med förslag.
+     * @param {void} item
+     * @returns {item}
+     */
+    formatPreviewStr = (item) => {
+        return item[this.props.listItemArgs[0].property];
+    }
+
+    /**
+     * @param {void} item
+     * @returns {item}
+     */
+    onPreviewItem = (item) => {
+        return (`Previewing item: ${item.property}`);
+    }
+
+    /**
+     * @param {void} item
+     * @returns {item}
+     */
+    handlePreview = (item) => {
+        const str = this.formatPreviewStr(item);
+        this.setState({
+            search: str,
+            searchSave: this.state.searchSave === undefined ? this.state.search : this.state.searchSave,
+            showPortal: true
+        });
+        this.onPreviewItem(item);
+    }
+
 
     /**
      * Anropas när tangent pil-upp trycks. Om dropdown menyn är ovanför, så reverseras inputen.
@@ -326,8 +391,8 @@ export default class AutoComplete extends React.PureComponent {
      */
     getFocusedItemIndex = () => {
         const focusedId = document.activeElement && document.activeElement.id;
-        let focusedItemIndex = -1;
-        if (focusedId != "" && this.parseId(focusedId)[0] === this.props.uniqueId) {
+        let focusedItemIndex = 0;
+        if (focusedId != "" && this.parseId(focusedId)[0] === this.state.uniqueId) {
             focusedItemIndex = parseInt(this.parseId(focusedId)[1]);
         }
         return focusedItemIndex;
@@ -349,37 +414,35 @@ export default class AutoComplete extends React.PureComponent {
         if (apiParameterNotUpToDate) {
             const search = this.state.search;
             // Om man tömt fältet så behöver vi ej ställa frågan och kan då nulla resultatet i fältet.
-            if (search.length === 0 && this.props.allowClear === true) {
+            if (search.length === 0) {
                 this.closePortal();
                 const item = undefined;
                 this.props.onSelectItem(item);
             } else {
-                flowControlTask(this.props.uniqueId, () => {
+                flowControlTask(this.state.uniqueId, () => {
                     return this.props.onSearch(search);
                 }, payload => {
                     if (payload.length > 0) {
                         this.gotNewData(payload, search);
                         this.props.onSelectItem(payload[0]);
                         this.closePortal();
-    
-                        if (this.props.onShortcutkeyCellRightWrap) {
-                            this.props.onShortcutkeyCellRightWrap();
-                        }
                     }
                 }, DoIt.NOW);
             }
 
             return true;
         }
+
         const items = this.state.items;
         const focusedItemIndex = this.getFocusedItemIndex();
-        if (focusedItemIndex >= 0) {
+
+        if (focusedItemIndex >= 1) {
             // Om ett alternativ i dropdown listan är fokuserat, välj värdet och stäng söklistan.
             this.closePortal();
             const item = items[focusedItemIndex];
             this.props.onSelectItem(item);
-        } else if (focusedItemIndex === -1 && this.state.search.length === 0 && this.props.allowClear === true) {
-            // Om inget alternativ i dropdown listan är fokuserat och längden på söksträngen är 0 samt allowClear är true, välj undefined som värde för att rensa det från fältet och stäng söklistan.
+        } else if (focusedItemIndex === -1 && this.state.search.length === 0) {
+            // Om inget alternativ i dropdown listan är fokuserat och längden på söksträngen är 0, välj undefined som värde för att rensa det från fältet och stäng söklistan.
             this.closePortal();
             const item = undefined;
             this.props.onSelectItem(item);
@@ -408,9 +471,6 @@ export default class AutoComplete extends React.PureComponent {
         this.setState({
             search: this.state.searchSave !== undefined ? this.state.searchSave : this.state.search
         });
-        if (this.props.preview) {
-            this.props.preview.onPreviewItem(undefined);
-        }
         const textFieldDOMNode = ReactDOM.findDOMNode(this.refs.textField);
         if (textFieldDOMNode) {
             textFieldDOMNode.focus();
@@ -420,163 +480,89 @@ export default class AutoComplete extends React.PureComponent {
 
     render() {
         const {
-            disabled,
-            itemContentComponent,
-            loading,
-            className,
-            maxLength,
-            placeholder,
+            listItemArgs
         } = this.props;
-
         const item = document.getElementById(this.state.uniqueId);
-
         const showPortal = this.state.showPortal && this.state.items.length !== 0;
+        const style = {
+        };
 
+        // Skapar en lista med options baserat på vad användaren skrivit in
         return (
-            <div className={`auto-complete ${className ? className : ""}`} id={this.state.uniqueId} onFocusCapture={this.showPortalForExistingData} ref={this.scrollRef}>
-                <TextField
-                    autoFocus={this.props.autoFocus}
-                    disabled={disabled}
-                    onChange={this.onEdit}
-                    onEdit={this.onEdit}
-                    property="search"
-                    source={this.state}
-                    ref="textField"
-                    maxLength={maxLength}
-                    onClick={this.showPortalForExistingData}
-                    placeholder={placeholder} />
-                {loading && <div className="loading-icon"><Icon type={iconTypes.spinner} /></div>}
-                {showPortal && (
-                    <PortalOverview parentElement={item}
-                        className={className}
-                        onClose={this.closePortal}
-                        onDirectionCallback={this.getDropDownDirection}
-                        returnFocusOnTabbingOut={false}>
-                        <div className="autocomplete-portal">
-                            <div className={`auto-complete-list ${className ? className : ""}${this.state.direction.up ? " reverse" : ""}`} ref={this.scrollRef}>
-                                <ul className={`auto-complete-list-items${this.state.direction.up ? " reverse" : ""}`}>
-                                    {this.state.items.map((item, index) => (
-                                        <AutoCompleteItem
-                                            id={this.setId(index)}
-                                            item={item}
-                                            itemContentComponent={itemContentComponent}
-                                            key={index}
-                                            onSelectItem={this.onSelectItem}
-                                            ref={this.setId(index)} />
-                                    ))}
-                                </ul>
+            <React.Fragment>
+                <div className={"auto-complete"} id={this.state.uniqueId} onFocusCapture={this.showPortalForExistingData} ref={this.scrollRef}>
+                    <TextField
+                        autoFocus={false}
+                        disabled={false}
+                        onChange={this.onEdit}
+                        onEdit={this.onEdit}
+                        property="search"
+                        source={this.state}
+                        ref="textField"
+                        maxLength={1000}
+                        onClick={this.showPortalForExistingData}
+                        placeholder={""} />
+                    {showPortal && (
+                        <PortalOverview
+                            parentElement={item}
+                            onClose={this.closePortal}
+                            returnFocusOnTabbingOut={false}>
+                            <div className="autocomplete-portal">
+                                <div className={"auto-complete-list"} ref={this.scrollRef} style={style}>
+                                    <ul className={"auto-complete-list-items"}>
+                                        {this.state.items.map((item, index) => {
+                                            if (index === 0) {
+                                                return (
+                                                    <AutoCompleteItem
+                                                        id={this.setId(index)}
+                                                        items={this.state.items}
+                                                        onSelectItem={this.onSelectItem}
+                                                        ref={this.setId(index)}
+                                                        listItemArgs={listItemArgs}
+                                                        key={index}
+                                                        index={index}
+                                                        item={item}
+                                                    />
+                                                );
+                                            } else {
+                                                return (
+                                                    <AutoCompleteItem
+                                                        id={this.setId(index)}
+                                                        items={this.state.items}
+                                                        onSelectItem={this.onSelectItem}
+                                                        ref={this.setId(index)}
+                                                        listItemArgs={listItemArgs}
+                                                        key={index}
+                                                        index={index}
+                                                        item={item}
+                                                    />
+                                                );
+                                            }
+                                        })}
+                                    </ul>
+                                </div>
                             </div>
-                        </div>
-                    </PortalOverview>
-                )}
-            </div>
+                        </PortalOverview>)}
+                </div>
+            </React.Fragment>
         );
     }
 }
 
-AutoComplete.propTypes = {
-    /**
-     * Boolean som bedömmer huruvida resultatet skall få rensas ur fältet. Om sökfältet är tomt, inget alternativ i söklistan är fokuserat och man trycker på tab eller enter så rensas värdet då
-     * denna property är satt till true. Används av AutoComplete-fält där man vill kunna rensa värdet i fältet.
-     */
-    allowClear: PropTypes.bool,
+AutoCompleteTEST.propTypes = {
 
-    /**
-     * Autofokus aktiverad på textfältet i komponenten (default true)
-     */
-    autoFocus: PropTypes.bool,
+    listItemArgs: AutoCompletePropTypes,
 
-    /**
-     * Möjliggör att disabla komponenten
-     */
-    disabled: PropTypes.bool,
-
-    /*
-     * Tex när autocomplete ligger i gridden, defaulta in ett värde
-     */
-    initialSearch: PropTypes.string,
-
-    /**
-     * Komponent för egen rendering av saks innehåll
-     */
-    itemContentComponent: PropTypes.any,
-
-    /**
-     * Visar spinnande indikator
-     */
-    loading: PropTypes.bool,
-
-    /*
-     * Begränsa input
-     */
-    maxLength: PropTypes.number.isRequired,
-
-    /**
-     * onSearch(text) => Promise som evaluerar till en array av items
-     */
-    onSearch: PropTypes.func.isRequired,
-
-    /**
-     * onSelectItem(item)
-     * Exekveras då en rad väljs
-     */
+    //Denna triggas när man väljer ett alternativ i listan. Funktion behöver skrivas för vad som ska hända med värdet som plockas genom autocompletefältet.
     onSelectItem: PropTypes.func.isRequired,
 
-    /**
-     * Visar text när autocompletion är tom
-     */
-    placeholder: PropTypes.string,
+    //onSearch(text) => Promise som evaluerar till en array av items
+    onSearch: PropTypes.func.isRequired
 
-    /*
-     * När användaren går i listan med pil upp/ner visas item i sökfältet
-     */
-    preview: PropTypes.shape({
-        /*
-         * formatPreviewStr(item)
-         * hur item formateras i editfältet
-         */
-        formatPreviewStr: PropTypes.func.isRequired,
-
-        /*
-         * onPreviewItem(item)
-         * Vill man välja med tex > knapp är det denna item
-         */
-        onPreviewItem: PropTypes.func.isRequired,
-
-        /*
-         * onPreviewEdit(text)
-         * För gridden, vad som skrivs i editfältet
-         */
-        onPreviewEdit: PropTypes.func
-    }),
-
-    /**
-     * Unikt id som identifierar autocompletion fältet. Används även av flowControlTask.
-     */
-    uniqueId: PropTypes.string.isRequired,
-
-    /**
-     * Tilldelat ett dynamiskt klassnamn för CSS.
-     */
-    className: PropTypes.string,
-
-    /**
-     * Callback för att sätta keys som behövs för tillfället.
-     * Detta så att grid inte käkar upp dem.
-     */
-    callbackGridIgnoreKeys: PropTypes.func,
-
-    /**
-     * Används endast om AutoCompleten ligger i en Cell innuti en Grid.
-     * 
-     * Funktion som anropas efter att man trycker på Tab eller Enter.
-     * Hoppar till nästa lediga fält i gridden. 
-     * Används så att den först hoppar till nästa cell _efter_ att data laddats in i raden.
-     * Samt att den stannar kvar i cellen om ingen träff sker. 
-     */
-    onShortcutkeyCellRightWrap: PropTypes.func,
 };
 
-AutoComplete.defaultProps = {
+AutoCompleteTEST.defaultProps = {
     autoFocus: true
 };
+
+
